@@ -20,3 +20,7 @@
 - Reddit API & IEXFinance API
 - ReactJS
 
+## Script preview:
+![stocks1](https://user-images.githubusercontent.com/59063950/104136379-b8123200-5363-11eb-9ec0-a425897bf824.png)
+![stock2](https://user-images.githubusercontent.com/59063950/104136390-c95b3e80-5363-11eb-8a50-f083fb2436ee.png)
+

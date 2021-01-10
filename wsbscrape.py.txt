@@ -1,0 +1,236 @@
+#! python3 
+# the above is the "shebang line"; helps computer locate python
+
+import praw # connect to Reddit API (python reddit api wrapper)
+import pandas as pd # handle, format export data
+import datetime as dt # convert unix timestamp
+import time as time # get unix timestamp
+import re
+from iexfinance.stocks import Stock
+from iexfinance.stocks import get_historical_data
+import os
+# Set IEX Finance API Token for Sandbox test mode
+os.environ['IEX_API_VERSION'] = 'iexcloud-sandbox'
+os.environ['IEX_TOKEN'] = os.environ['IEX_TEST']
+
+# Set IEX Finance API to production mode
+#os.environ['IEX_API_VERSION'] = 'iexcloud-v1'
+# IEX_TOKEN already set in environment variable
+
+# connecting to reddit API
+def connect_reddit():
+    # connect to reddit and store in a variable with praw.Reddit()
+    # client id used for reddit to identify my app, used with secret to get access token (OAuth)
+    reddit = praw.Reddit(client_id='VWDfl0X3JFVwWQ', \
+        client_secret=os.environ['REDDIT_SECRET'], \
+        user_agent='wsbscrape', \
+        username=os.environ['REDDIT_NAME'], \
+        password=os.environ['REDDIT_PASS']
+        )
+
+    # to retrieve subreddit, pass in the sub's name
+    subreddit = reddit.subreddit('wallstreetbets')
+
+    # each subreddit separated in diff topics, such as top, hot, etc.
+    # -> grabbing recent 1000 posts (limit = latest X nb of posts):
+    top_subreddit = subreddit.new(limit=None)
+    return top_subreddit
+
+# ==== PLAN ====
+# filter out posts which are too recent (<4 days = invalid = around 345600 in UNIX timestamp)
+def validate_post(date) -> bool:
+    today = time.time()
+    if date <= (today - 345600):
+        return True
+# for each post, parse title and body for ticker: [def get_ticker] and put in dict
+
+# helper function for get_ticker, extracts ticker after dollar signs if exists
+def check_after_dollarsign(body, start_index):
+   """
+   Given a starting index and text, this will extract the ticker, return None if it is incorrectly formatted.
+   """
+   count  = 0
+   ticker = ""
+
+   for char in body[start_index:]:
+      # if it should return
+      if not char.isalpha():
+         # if there aren't any letters following the $
+         if (count == 0):
+            return None
+
+         return ticker.upper()
+      else:
+         ticker += char
+         count += 1
+
+   return ticker.upper()
+
+# function to retrieve ticker from a body of text
+def get_ticker(body):
+   # frequent words that look like tickers but aren't
+   blacklist_words = [
+      "YOLO", "TOS", "CEO", "CFO", "CTO", "DD", "BTFD", "WSB", "OK", "RH",
+      "KYS", "FD", "TYS", "US", "USA", "IT", "ATH", "RIP", "BMW", "GDP",
+      "OTM", "ATM", "ITM", "IMO", "LOL", "DOJ", "BE", "PR", "PC", "ICE",
+      "TYS", "ISIS", "PRAY", "PT", "FBI", "SEC", "GOD", "NOT", "POS", "COD",
+      "AYYMD", "FOMO", "TL;DR", "EDIT", "STILL", "LGMA", "WTF", "RAW", "PM",
+      "LMAO", "LMFAO", "ROFL", "EZ", "RED", "BEZOS", "TICK", "IS", "DOW"
+      "AM", "PM", "LPT", "GOAT", "FL", "CA", "IL", "PDFUA", "MACD", "HQ",
+      "OP", "DJIA", "PS", "AH", "TL", "DR", "JAN", "FEB", "JUL", "AUG",
+      "SEP", "SEPT", "OCT", "NOV", "DEC", "FDA", "IV", "ER", "IPO", "RISE"
+      "IPA", "URL", "MILF", "BUT", "SSN", "FIFA", "USD", "CPU", "AT",
+      "GG", "ELON"
+   ]
+
+   # FIRST CHECK IF THERE'S A $TICKER WITH DOLLAR SIGN
+   if '$' in body:
+      index = body.find('$') + 1
+      word = check_after_dollarsign(body, index)
+      
+      if word and word not in blacklist_words:
+         try:
+            # special case for $ROPE
+            if word != "ROPE":
+               # sends request to IEX API to determine whether the current word is a valid ticker
+               # if it isn't, it'll return an error and therefore continue on to the next word
+               price = Stock(word).get_company()
+               return word
+         except Exception as e:
+            print("[Skipped one post]")
+            print(e)
+            pass
+   
+   # IF NO TICKER WITH DOLLAR SIGN, CHECK FOR TICKER WITHOUT IT: splits every body into list of words
+   word_list = re.sub("[^\w]", " ",  body).split()
+   for count, word in enumerate(word_list):
+      # initial screening of words
+      if word.isupper() and len(word) >= 1 and (word.upper() not in blacklist_words) and len(word) <= 5 and word.isalpha():
+         try:
+            # special case for $ROPE
+            if word != "ROPE":
+               price = Stock(word).get_company()
+               return word
+         except Exception as e: 
+            print("[Skipped one post]")
+            print(e)
+            continue
+      
+   # if no ticker was found
+   return None
+
+# BRAINSTORM: 
+# CHECK CONNECTION TO IEXSTOCK + HOW TO GET URL OF REDDIT POST ##DONE
+# check if ticker exists with finance api [validate_ticker] ##DONE
+# if exists, check the ticker's stock growth % in the month after it was posted with finance API #DONE
+# highlight the ones with a growth +%. mention the post' author #DONE
+# --> tells you which DD could be interesting to take a look at!
+# //make the website re-fetch data in time interval, list out the data in front page with pandas, maybe dono button too?
+
+# PARSING AND DOWNLOADING DATA =========================
+
+# stores data in a dataframe; returns the dataframe object
+def store_data(top_subreddit):
+    # dictionary to hold the attributes of each hot post/submission of the subreddit
+    top_info = {"ticker" : [],
+               "title" : [], 
+               "score" : [], 
+               "upvote_ratio" : [], 
+               "author" : [], 
+               "text" : [],
+               "growth" : [],
+               "url" : [],
+               "created" : []}
+
+    # adding the attributes of the hot posts to the dictionary
+    for posts in top_subreddit:
+         # only add if it's a DD
+        if(posts.link_flair_text == "DD" and validate_post(posts.created)):
+            top_info["title"].append(posts.title)
+            top_info["score"].append(posts.score)
+            top_info["upvote_ratio"].append(posts.upvote_ratio)
+            top_info["author"].append(posts.author)
+            top_info["text"].append(posts.selftext)
+            top_info["created"].append(posts.created)
+            top_info["url"].append(posts.url)
+            ticker = get_ticker(posts.title)
+            top_info["ticker"].append(ticker)
+            top_info["growth"].append(growth(ticker, posts.created))
+
+    # converting dictionary to dataframe table for illustration
+    top_data = pd.DataFrame(top_info)
+    
+    # applies the get_date() function on all values of created column, returns new column
+    _timestamp = top_data["created"].apply(get_date)
+    # append human readable date to 'created' column
+    top_data = top_data.assign(created = _timestamp)
+    return top_data
+
+# convert date from UNIX timestamp to normal date time
+def get_date(created):
+    return dt.datetime.fromtimestamp(created)
+
+# export to csv file
+def export(dataframe):
+    path = r'D:\mattx\Videos\''
+    dataframe.to_csv(path+"wsb.csv",index=False)
+    
+# computes growth % of given DD
+# (today's price / (price at DD's date - 2 days)) - 1 = percentage growth from then to now of the stock
+def growth(ticker, created):
+    if ticker is None:
+        return None
+    # get today's date and DD's date (ranges from <>1 week in case of weekends/holidays)
+    try:
+        today = get_date(time.time() - 604800)
+        today_end = dt.date.today()
+        ticker_date = get_date(created - 604800)
+        ticker_date_end = get_date(created)
+        # get today's price and DD date's price
+        price_today = get_historical_data(ticker, today, today_end, close_only=True)
+        price_today = price_today.close[len(price_today.close)-1] # get latest price for end date
+        price_ticker_date = get_historical_data(ticker, ticker_date, ticker_date_end, close_only=True).close[0]
+        # compute percentage growth
+        percentage = ((price_today / price_ticker_date) - 1) * 100
+        return percentage
+    except Exception as e:
+        print("==== Error in growth() function ====")
+        print(e)
+        return None
+
+# format percentage & suppress chaining warning
+def format_growth(dataframe):
+    _growth = dataframe["growth"].map(lambda x: "{:.2f}".format(x) + "%")
+    return dataframe.assign(growth = _growth)
+    
+# cleans the dataframe; removes rows with unidentified tickers
+def clean(dataframe):
+    return dataframe.dropna()
+
+# filter DDs for stocks with 2%+ growth
+def filter_five(dataframe):
+    return dataframe.drop(dataframe[dataframe.growth < 2].index)
+
+# runs the whole program
+def run():
+    # connects to reddit api and returns a subreddit object of the newest posts
+    top_subreddit = connect_reddit()
+    # stores the filtered data of each post in the subreddit obj inside a dataframe
+    dataframe = store_data(top_subreddit)
+    return dataframe
+    
+if __name__ == "__main__":
+    dataframe = run()
+    # clean the NaN values & df with >% growth
+    clean_df = clean(dataframe)
+    five_df = filter_five(clean_df)
+    # format growth column into percentages
+    clean_df = format_growth(clean_df)
+    five_df = format_growth(five_df)
+    
+    print("\n===== Exporting to Excel =====")
+    print(clean_df)
+    print()
+    print(five_df)
+    #export(dataframe)
+    print("\n===== Done =====")

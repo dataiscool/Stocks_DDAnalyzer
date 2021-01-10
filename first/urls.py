@@ -1,0 +1,26 @@
+"""first URL Configuration
+
+The `urlpatterns` list routes URLs to views. For more information please see:
+    https://docs.djangoproject.com/en/3.1/topics/http/urls/
+Examples:
+Function views
+    1. Add an import:  from my_app import views
+    2. Add a URL to urlpatterns:  path('', views.home, name='home')
+Class-based views
+    1. Add an import:  from other_app.views import Home
+    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
+Including another URLconf
+    1. Import the include() function: from django.urls import include, path
+    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+"""
+from django.contrib import admin
+from django.urls import path, include
+
+# urls.py in the project level represents a sort of table of contents
+
+urlpatterns = [
+    path('admin/', admin.site.urls),
+    path('helloapp/', include('helloapp.urls')), # goes to helloapp app, and includes its urls
+    path('newyear/', include('newyear.urls')), # goes to newyear app and looks to all its urls in urls.py
+    path('tasks/', include('tasks.urls'))
+]
